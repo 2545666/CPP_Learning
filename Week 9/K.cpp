@@ -1,54 +1,37 @@
-#include <iostream>
+ #include <iostream>
 #include <vector>
 using namespace std;
 
-int main() {
-    int m, n;
-    bool first_case = true; // 控制组间空行
-    while (cin >> m) { // 循环读取多组数据
-        if (!first_case) {
-            cout << endl; // 组与组之间输出空行
-        }
-        first_case = false;
-        
-        // 读取集合 A
-        vector<int> A(m);
-        for (int i = 0; i < m; ++i) {
-            cin >> A[i];
-        }
-        
-        // 读取集合 B
-        cin >> n;
-        vector<int> B(n);
-        for (int i = 0; i < n; ++i) {
-            cin >> B[i];
-        }
-        
-        // 输出集合 A 原始数据
-        for (int i = 0; i < A.size(); ++i) {
-            if (i > 0) cout << " ";
-            cout << A[i];
-        }
-        cout << "\n";
-        
-        // 输出集合 B 原始数据
-        for (int i = 0; i < B.size(); ++i) {
-            if (i > 0) cout << " ";
-            cout << B[i];
-        }
-        cout << "\n";
-        
-        // 依次插入 B 的元素并输出
-        vector<int> currentA = A; // 用副本操作，不影响原始A
-        for (int i = 0; i < B.size(); ++i) {
-            currentA.push_back(B[i]); // 插入元素到尾部
-            for (int j = 0; j < currentA.size(); ++j) {
-                if (j > 0) cout << " ";
-                cout << currentA[j];
-            }
-            cout << "\n";
+bool f(const vector<int>& a,int v){
+    for(int x:a)if(x==v)return 1;
+    return 0;
+}
+
+void p(const vector<int>& a){
+    for(size_t i=0;i<a.size();++i){
+        if(i)cout<<" ";
+        cout<<a[i];
+    }
+    cout<<endl;
+}
+
+int main(){
+    bool t=1;
+    int m,n;
+    while(scanf("%d",&m)!=EOF){
+        if(!t)cout<<endl;
+        t=0;
+        vector<int> a(m);
+        for(int i=0;i<m;++i)scanf("%d",&a[i]);
+        scanf("%d",&n);
+        vector<int> b(n);
+        for(int i=0;i<n;++i)scanf("%d",&b[i]);
+        p(a);p(b);
+        for(int x:b){
+            if(!f(a,x))a.push_back(x);
+            p(a);
+     
         }
     }
-    
     return 0;
 }
