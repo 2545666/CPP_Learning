@@ -86,7 +86,7 @@ struct Matrix {
         }
         return result;
     }
-// 新增：矩阵转置乘以向量 (用于反向传播传递梯度)
+
     std::vector<double> transposeMultiply(const std::vector<double>& vec) const {
         std::vector<double> result(cols, 0.0);
         for (int i = 0; i < rows; ++i) {
@@ -96,7 +96,7 @@ struct Matrix {
         }
         return result;
     }
-}; // Matrix 结束 
+};
 
 // ==================== 激活函数 ====================
 class Activation {
@@ -110,7 +110,7 @@ public:
                 }
         return output;
     }
-    // 新增：针对一维向量的全连接层 ReLU 激活函数
+
     static std::vector<double> relu(const std::vector<double>& input) {
         std::vector<double> output(input.size());
         for (size_t i = 0; i < input.size(); ++i) {
@@ -118,6 +118,7 @@ public:
         }
         return output;
     }
+
     static Tensor3D reluGradient(const Tensor3D& input, const Tensor3D& gradient) {
         Tensor3D output(input.channels, input.height, input.width);
         for (int c = 0; c < input.channels; ++c)
@@ -146,7 +147,7 @@ public:
 class ConvLayer {
 public:
     int inChannels, outChannels, kernelSize, stride, padding;
-    std::vector<Tensor3D> kernels;      // [outChannel][inChannel][kH][kW]
+    std::vector<Tensor3D> kernels;
     std::vector<double> biases;
     Tensor3D inputCache;
 
@@ -342,6 +343,10 @@ public:
     std::vector<double> learningRate;
     int inputChannels, inputHeight, inputWidth;
 
+    // 预留的特征图缓存变量
+    Tensor3D cache_C1;
+    Tensor3D cache_S4;
+
     CNN(int inC, int inH, int inW) : inputChannels(inC), inputHeight(inH), inputWidth(inW) {}
 
     ~CNN() {
@@ -350,105 +355,77 @@ public:
         for (auto p : fcLayers) delete p;
     }
 
-    // LeNet-5架构
- void buildLeNet5() {
-        // C1: 卷积层 (1×28×28 → 6×28×28)，引入 padding=2 补齐 32x32 等效尺寸
+    void buildLeNet5() {
         convLayers.push_back(new ConvLayer(1, 6, 5, 1, 2));
-        // S2: 池化层 (6×28×28 → 6×14×14)
         poolLayers.push_back(new PoolingLayer(2, 2));
-        // C3: 卷积层 (6×14×14 → 16×10×10)
         convLayers.push_back(new ConvLayer(6, 16, 5, 1, 0));
-        // S4: 池化层 (16×10×10 → 16×5×5)
         poolLayers.push_back(new PoolingLayer(2, 2));
-        // C5: 卷积层 (16×5×5 → 120×1×1)
         convLayers.push_back(new ConvLayer(16, 120, 5, 1, 0));
-        // FC1: 全连接层 (120 → 84)
         fcLayers.push_back(new FullyConnectedLayer(120, 84));
-        // FC2: 全连接层 (84 → 10)
         fcLayers.push_back(new FullyConnectedLayer(84, 10));
     }
 
-    // 前向传播
     std::vector<double> forward(const Tensor3D& input) {
         Tensor3D x = input;
 
-        // 卷积 + ReLU + 池化 (C1 → S2)
         x = convLayers[0]->forward(x);
         x = Activation::relu(x);
+        cache_C1 = x; // 拦截 C1
+
         x = poolLayers[0]->forward(x);
 
-        // 卷积 + ReLU + 池化 (C3 → S4)
         x = convLayers[1]->forward(x);
         x = Activation::relu(x);
+        
         x = poolLayers[1]->forward(x);
+        cache_S4 = x; // 拦截 S4
 
-        // 卷积 + ReLU (C5)
         x = convLayers[2]->forward(x);
         x = Activation::relu(x);
 
-        // 展平
         std::vector<double> flat;
         for (int c = 0; c < x.channels; ++c)
             for (int h = 0; h < x.height; ++h)
                 for (int w = 0; w < x.width; ++w)
                     flat.push_back(x.at(c, h, w));
 
-        // 全连接层
         flat = fcLayers[0]->forward(flat);
         flat = Activation::relu(flat);
         flat = fcLayers[1]->forward(flat);
 
-        // Softmax输出
         return Activation::softmax(flat);
     }
 
-    // 训练一个样本
     double train(const Tensor3D& input, const std::vector<double>& target) {
-        // 前向传播
         auto output = forward(input);
 
-        // 计算交叉熵损失
         double loss = 0.0;
         for (size_t i = 0; i < target.size(); ++i) {
             loss -= target[i] * std::log(std::max(output[i], 1e-10));
         }
 
-        // 反向传播 (仅限全连接层)
         std::vector<double> gradFC2 = output;
         for (size_t i = 0; i < target.size(); ++i) {
-            gradFC2[i] -= target[i]; // Softmax + CrossEntropy 组合梯度
+            gradFC2[i] -= target[i]; 
         }
 
-        // 1. 在更新 FC2 权重之前，先计算回传给 FC1 的梯度 (使用转置乘法)
         std::vector<double> gradFC1_out = fcLayers[1]->weights.transposeMultiply(gradFC2);
-
-        // 2. 更新 FC2 权重
         updateFCGradient(fcLayers[1], gradFC2);
 
-        // 3. 应用 FC1 后激活函数 ReLU 的导数
-        // 需获取 FC1 未经 ReLU 的原始输出进行符号判断
         std::vector<double> fc1_unactivated = fcLayers[0]->forward(fcLayers[0]->inputCache);
         std::vector<double> gradFC1_in(gradFC1_out.size(), 0.0);
         for (size_t i = 0; i < gradFC1_out.size(); ++i) {
             gradFC1_in[i] = (fc1_unactivated[i] > 0) ? gradFC1_out[i] : 0.0;
         }
 
-        // 4. 更新 FC1 权重
         updateFCGradient(fcLayers[0], gradFC1_in);
-        
-        // 注：若要网络具备完整学习能力，还需补充展平层到 C5 的梯度重构以及所有 ConvLayer 的反向传播代码。
-
         return loss;
     }
-    // ---------------- 在 CNN 类中新增持久化方法 ----------------
+
     void saveModel(const std::string& filepath) {
         std::ofstream outFile(filepath, std::ios::binary);
-        if (!outFile.is_open()) {
-            std::cerr << "无法创建模型保存文件: " << filepath << std::endl;
-            return;
-        }
+        if (!outFile.is_open()) return;
 
-        // 1. 保存卷积层权重与偏置 (必须保存，否则随机初始化的特征提取器会变)
         for (auto conv : convLayers) {
             for (int oc = 0; oc < conv->outChannels; ++oc) {
                 for (int ic = 0; ic < conv->inChannels; ++ic) {
@@ -461,7 +438,6 @@ public:
             outFile.write(reinterpret_cast<const char*>(conv->biases.data()), conv->outChannels * sizeof(double));
         }
 
-        // 2. 保存全连接层权重与偏置
         for (auto fc : fcLayers) {
             for (int i = 0; i < fc->outputSize; ++i) {
                 outFile.write(reinterpret_cast<const char*>(fc->weights.data[i].data()), 
@@ -469,19 +445,13 @@ public:
             }
             outFile.write(reinterpret_cast<const char*>(fc->bias.data()), fc->outputSize * sizeof(double));
         }
-
         outFile.close();
-        std::cout << "模型参数成功保存至: " << filepath << std::endl;
     }
 
     void loadModel(const std::string& filepath) {
         std::ifstream inFile(filepath, std::ios::binary);
-        if (!inFile.is_open()) {
-            std::cerr << "未找到模型文件，将使用随机初始化的权重。" << std::endl;
-            return;
-        }
+        if (!inFile.is_open()) return;
 
-        // 1. 读取卷积层权重与偏置
         for (auto conv : convLayers) {
             for (int oc = 0; oc < conv->outChannels; ++oc) {
                 for (int ic = 0; ic < conv->inChannels; ++ic) {
@@ -494,7 +464,6 @@ public:
             inFile.read(reinterpret_cast<char*>(conv->biases.data()), conv->outChannels * sizeof(double));
         }
 
-        // 2. 读取全连接层权重与偏置
         for (auto fc : fcLayers) {
             for (int i = 0; i < fc->outputSize; ++i) {
                 inFile.read(reinterpret_cast<char*>(fc->weights.data[i].data()), 
@@ -502,9 +471,7 @@ public:
             }
             inFile.read(reinterpret_cast<char*>(fc->bias.data()), fc->outputSize * sizeof(double));
         }
-
         inFile.close();
-        std::cout << "模型参数成功加载自: " << filepath << std::endl;
     }
 
 private:
@@ -518,7 +485,6 @@ private:
     }
 };
 
-// ==================== MNIST数据加载 ====================
 class MNISTLoader {
 public:
     static Tensor3D loadImage(const std::string& filename) {
