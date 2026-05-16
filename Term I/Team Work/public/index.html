@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>CNN Vision Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #0a192f;
+            --panel-bg: #112240;
+            --text-main: #ccd6f6;
+            --accent-blue: #64ffda;
+            --accent-silver: #8892b0;
+            --border-line: #233554;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { color: var(--accent-silver); text-transform: uppercase; letter-spacing: 2px; }
+        .dashboard {
+            display: flex;
+            gap: 30px;
+            max-width: 1200px;
+            width: 100%;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-line);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px -15px rgba(2,12,27,0.7);
+        }
+        .canvas-container { display: flex; flex-direction: column; gap: 15px; }
+        canvas { background: #000; border: 2px solid var(--border-line); cursor: crosshair; }
+        .btn-group { display: flex; gap: 10px; }
+        button {
+            background: transparent;
+            color: var(--accent-blue);
+            border: 1px solid var(--accent-blue);
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover { background: rgba(100, 255, 218, 0.1); }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .feature-box { text-align: center; font-size: 12px; color: var(--accent-silver); }
+        .feature-box canvas { width: 60px; height: 60px; image-rendering: pixelated; }
+
+        .prob-bar-container { display: flex; align-items: center; margin-bottom: 8px; font-family: monospace;}
+        .prob-label { width: 20px; font-weight: bold; color: var(--accent-silver); }
+        .prob-bar { height: 12px; background: var(--accent-blue); width: 0%; transition: width 0.3s; }
+        .prob-value { margin-left: 10px; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <h1>CNN Vision Dashboard</h1>
+
+    <div class="dashboard">
+        <div class="panel canvas-container">
+            <h3>Input Layer (28x28)</h3>
+            <canvas id="drawCanvas" width="280" height="280"></canvas>
+            <div class="btn-group">
+                <button onclick="clearCanvas()">CLEAR</button>
+                <button onclick="recognize()">EXECUTE</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>C1 Features (Conv)</h3>
+            <div class="features-grid" id="c1-grid"></div>
+            <h3 style="margin-top: 20px;">S4 Features (Pool)</h3>
+            <div class="features-grid" id="s4-grid"></div>
+        </div>
+
+        <div class="panel" style="min-width: 250px;">
+            <h3>Output Probabilities</h3>
+            <div id="prob-chart"></div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化图表 DOM
+        const probChart = document.getElementById('prob-chart');
+        for (let i = 0; i < 10; i++) {
+            probChart.innerHTML += `
+                <div class="prob-bar-container">
+                    <div class="prob-label">${i}</div>
+                    <div style="flex-grow: 1; background: #233554; height: 12px; margin-left: 10px;">
+                        <div class="prob-bar" id="bar-${i}"></div>
+                    </div>
+                    <div class="prob-value" id="val-${i}">0.00%</div>
+                </div>`;
+        }
+
+        // 画板逻辑
+        const canvas = document.getElementById('drawCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 20;
+        ctx.strokeStyle = 'white';
+
+        canvas.addEventListener('mousedown', (e) => { isDrawing = true; draw(e); });
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', () => { isDrawing = false; ctx.beginPath(); });
+        canvas.addEventListener('mouseleave', () => { isDrawing = false; ctx.beginPath(); });
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+        }
+
+        function clearCanvas() {
+            ctx.fillRect(0, 0, canvas.width, canvas.height); // Black background
+            updateChart(new Array(10).fill(0));
+            document.getElementById('c1-grid').innerHTML = '';
+            document.getElementById('s4-grid').innerHTML = '';
+        }
+
+        // 核心识别逻辑
+        async function recognize() {
+            // 1. 将 280x280 下采样至 28x28
+            const offscreen = document.createElement('canvas');
+            offscreen.width = 28; offscreen.height = 28;
+            const octx = offscreen.getContext('2d');
+            octx.drawImage(canvas, 0, 0, 28, 28);
+            
+            // 2. 提取像素灰度值，归一化到 0-1
+            const imgData = octx.getImageData(0, 0, 28, 28).data;
+            const pixels = [];
+            for (let i = 0; i < imgData.length; i += 4) {
+                pixels.push(imgData[i] / 255.0); // 仅取 R 通道，因黑白图 RGB 相等
+            }
+
+            // 3. 发送给 Node.js
+            const response = await fetch('/api/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pixels })
+            });
+            const data = await response.json();
+
+            // 4. 渲染数据
+            updateChart(data.probabilities);
+            renderFeatures('c1-grid', data.c1_features, 28);
+            renderFeatures('s4-grid', data.s4_features, 5);
+        }
+
+        function updateChart(probs) {
+            probs.forEach((p, i) => {
+                const percent = (p * 100).toFixed(2);
+                document.getElementById(`bar-${i}`).style.width = percent + '%';
+                document.getElementById(`val-${i}`).innerText = percent + '%';
+                // 高亮预测值
+                document.getElementById(`bar-${i}`).style.background = p > 0.5 ? '#64ffda' : '#8892b0';
+            });
+        }
+
+        function renderFeatures(containerId, channelsData, size) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            channelsData.forEach((channel, idx) => {
+                const box = document.createElement('div');
+                box.className = 'feature-box';
+                const fCanvas = document.createElement('canvas');
+                fCanvas.width = size; fCanvas.height = size;
+                const fCtx = fCanvas.getContext('2d');
+                const iData = fCtx.createImageData(size, size);
+                
+                let p = 0;
+                for (let h = 0; h < size; h++) {
+                    for (let w = 0; w < size; w++) {
+                        const val = channel[h][w]; // 0-255 灰度
+                        iData.data[p++] = val; // R
+                        iData.data[p++] = val; // G
+                        iData.data[p++] = val; // B
+                        iData.data[p++] = 255; // Alpha
+                    }
+                }
+                fCtx.putImageData(iData, 0, 0);
+                box.appendChild(fCanvas);
+                box.innerHTML += `<div>CH ${idx}</div>`;
+                container.appendChild(box);
+            });
+        }
+
+        // 初始填充黑底
+        clearCanvas();
+    </script>
+</body>
+</html>
