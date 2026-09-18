@@ -51,7 +51,8 @@
             font-weight: bold;
             transition: all 0.3s;
         }
-        button:hover { background: rgba(100, 255, 218, 0.1); }
+        button:hover:not(:disabled) { background: rgba(100, 255, 218, 0.1); }
+        button:disabled { color: var(--accent-silver); border-color: var(--border-line); cursor: not-allowed; }
         
         .features-grid {
             display: grid;
@@ -65,11 +66,26 @@
         .prob-label { width: 20px; font-weight: bold; color: var(--accent-silver); }
         .prob-bar { height: 12px; background: var(--accent-blue); width: 0%; transition: width 0.3s; }
         .prob-value { margin-left: 10px; font-size: 12px; }
+
+        .status-bar {
+            margin-bottom: 20px;
+            padding: 10px 15px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-line);
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--accent-silver);
+        }
+        .status-ok { color: #64ffda; }
+        .status-error { color: #ff6b6b; }
     </style>
 </head>
 <body>
 
     <h1>CNN Vision Dashboard</h1>
+    <div class="status-bar">
+        Status: <span id="status" class="status-error">Checking...</span>
+    </div>
 
     <div class="dashboard">
         <div class="panel canvas-container">
@@ -77,7 +93,7 @@
             <canvas id="drawCanvas" width="280" height="280"></canvas>
             <div class="btn-group">
                 <button onclick="clearCanvas()">CLEAR</button>
-                <button onclick="recognize()">EXECUTE</button>
+                <button id="execBtn" onclick="recognize()">EXECUTE</button>
             </div>
         </div>
 
@@ -95,7 +111,7 @@
     </div>
 
     <script>
-        // 初始化图表 DOM
+        // ==================== 初始化 ====================
         const probChart = document.getElementById('prob-chart');
         for (let i = 0; i < 10; i++) {
             probChart.innerHTML += `
@@ -108,7 +124,30 @@
                 </div>`;
         }
 
-        // 画板逻辑
+        // ==================== 健康检查 ====================
+        async function checkHealth() {
+            try {
+                const response = await fetch('http://localhost:3000/api/health');
+                const data = await response.json();
+                const statusEl = document.getElementById('status');
+                if (response.ok && data.engine === 'running') {
+                    statusEl.textContent = '✓ Backend & Engine Running';
+                    statusEl.className = 'status-ok';
+                } else {
+                    statusEl.textContent = '✗ Engine Not Running';
+                    statusEl.className = 'status-error';
+                }
+            } catch (err) {
+                document.getElementById('status').textContent = '✗ Backend Unreachable';
+                document.getElementById('status').className = 'status-error';
+            }
+        }
+
+        // 页面加载时检查健康状态，每 5 秒检查一次
+        checkHealth();
+        setInterval(checkHealth, 5000);
+
+        // ==================== 画板逻辑 ====================
         const canvas = document.getElementById('drawCanvas');
         const ctx = canvas.getContext('2d');
         let isDrawing = false;
@@ -132,39 +171,87 @@
         }
 
         function clearCanvas() {
-            ctx.fillRect(0, 0, canvas.width, canvas.height); // Black background
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             updateChart(new Array(10).fill(0));
             document.getElementById('c1-grid').innerHTML = '';
             document.getElementById('s4-grid').innerHTML = '';
         }
 
-        // 核心识别逻辑
+        // ==================== 核心识别逻辑 ====================
         async function recognize() {
-            // 1. 将 280x280 下采样至 28x28
-            const offscreen = document.createElement('canvas');
-            offscreen.width = 28; offscreen.height = 28;
-            const octx = offscreen.getContext('2d');
-            octx.drawImage(canvas, 0, 0, 28, 28);
-            
-            // 2. 提取像素灰度值，归一化到 0-1
-            const imgData = octx.getImageData(0, 0, 28, 28).data;
-            const pixels = [];
-            for (let i = 0; i < imgData.length; i += 4) {
-                pixels.push(imgData[i] / 255.0); // 仅取 R 通道，因黑白图 RGB 相等
+            const btn = document.getElementById('execBtn');
+            btn.innerText = 'PROCESSING...';
+            btn.disabled = true;
+
+            try {
+                // 1. 将 280x280 下采样至 28x28
+                const offscreen = document.createElement('canvas');
+                offscreen.width = 28;
+                offscreen.height = 28;
+                const octx = offscreen.getContext('2d');
+                octx.drawImage(canvas, 0, 0, 28, 28);
+                
+                // 2. 提取像素灰度值，归一化到 0-1
+                const imgData = octx.getImageData(0, 0, 28, 28).data;
+                const pixels = [];
+                for (let i = 0; i < imgData.length; i += 4) {
+                    pixels.push(imgData[i] / 255.0); // 仅取 R 通道
+                }
+
+                // 3. 发送给 Node.js
+                const response = await fetch('http://localhost:3000/api/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pixels })
+                });
+
+                // 4. 检查 HTTP 状态码
+                if (!response.ok) {
+                    let errorMsg = `HTTP ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        if (errorData.error) {
+                            errorMsg = errorData.error;
+                        }
+                    } catch (e) {
+                        // 无法解析错误响应体，使用默认错误信息
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                // 5. 解析响应 JSON
+                const data = await response.json();
+
+                // 6. 检查响应中的 error 字段
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // 7. 验证响应数据结构
+                if (!data.probabilities || !Array.isArray(data.probabilities)) {
+                    throw new Error('Invalid response: missing probabilities');
+                }
+                if (!data.c1_features || !Array.isArray(data.c1_features)) {
+                    throw new Error('Invalid response: missing c1_features');
+                }
+                if (!data.s4_features || !Array.isArray(data.s4_features)) {
+                    throw new Error('Invalid response: missing s4_features');
+                }
+
+                // 8. 渲染数据
+                updateChart(data.probabilities);
+                renderFeatures('c1-grid', data.c1_features, 28);
+                renderFeatures('s4-grid', data.s4_features, 5);
+
+            } catch (error) {
+                console.error("推理请求失败:", error);
+                alert(`请求失败\n\n错误信息: ${error.message}\n\n请确保:\n1. Node.js 服务正在运行 (http://localhost:3000)\n2. C++ 推理引擎 (main_engine.exe) 在同目录下\n3. 模型文件 (lenet5_weights.bin) 存在`);
+            } finally {
+                // 恢复按钮状态
+                btn.innerText = 'EXECUTE';
+                btn.disabled = false;
             }
-
-            // 3. 发送给 Node.js
-            const response = await fetch('/api/predict', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pixels })
-            });
-            const data = await response.json();
-
-            // 4. 渲染数据
-            updateChart(data.probabilities);
-            renderFeatures('c1-grid', data.c1_features, 28);
-            renderFeatures('s4-grid', data.s4_features, 5);
         }
 
         function updateChart(probs) {
@@ -180,28 +267,50 @@
         function renderFeatures(containerId, channelsData, size) {
             const container = document.getElementById(containerId);
             container.innerHTML = '';
+            
+            // 验证输入数据
+            if (!Array.isArray(channelsData) || channelsData.length === 0) {
+                container.innerHTML = '<p style="color: #ff6b6b;">No feature data</p>';
+                return;
+            }
+
             channelsData.forEach((channel, idx) => {
-                const box = document.createElement('div');
-                box.className = 'feature-box';
-                const fCanvas = document.createElement('canvas');
-                fCanvas.width = size; fCanvas.height = size;
-                const fCtx = fCanvas.getContext('2d');
-                const iData = fCtx.createImageData(size, size);
-                
-                let p = 0;
-                for (let h = 0; h < size; h++) {
-                    for (let w = 0; w < size; w++) {
-                        const val = channel[h][w]; // 0-255 灰度
-                        iData.data[p++] = val; // R
-                        iData.data[p++] = val; // G
-                        iData.data[p++] = val; // B
-                        iData.data[p++] = 255; // Alpha
+                try {
+                    // 验证 channel 是否为二维数组
+                    if (!Array.isArray(channel) || channel.length === 0) {
+                        console.warn(`Channel ${idx} is not a valid 2D array`);
+                        return;
                     }
+
+                    const box = document.createElement('div');
+                    box.className = 'feature-box';
+                    const fCanvas = document.createElement('canvas');
+                    fCanvas.width = size;
+                    fCanvas.height = size;
+                    const fCtx = fCanvas.getContext('2d');
+                    const iData = fCtx.createImageData(size, size);
+                    
+                    let p = 0;
+                    for (let h = 0; h < size; h++) {
+                        for (let w = 0; w < size; w++) {
+                            // 安全地访问嵌套数组
+                            let val = 0;
+                            if (channel[h] && typeof channel[h][w] === 'number') {
+                                val = Math.max(0, Math.min(255, channel[h][w])); // 确保在 0-255 范围内
+                            }
+                            iData.data[p++] = val;   // R
+                            iData.data[p++] = val;   // G
+                            iData.data[p++] = val;   // B
+                            iData.data[p++] = 255;   // Alpha
+                        }
+                    }
+                    fCtx.putImageData(iData, 0, 0);
+                    box.appendChild(fCanvas);
+                    box.innerHTML += `<div>CH ${idx}</div>`;
+                    container.appendChild(box);
+                } catch (err) {
+                    console.error(`Error rendering channel ${idx}:`, err);
                 }
-                fCtx.putImageData(iData, 0, 0);
-                box.appendChild(fCanvas);
-                box.innerHTML += `<div>CH ${idx}</div>`;
-                container.appendChild(box);
             });
         }
 
