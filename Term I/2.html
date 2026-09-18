@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会议纪要 - 计算机体系结构与存储器专题讲解</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { background-color: #F7F8FA; color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 12px; font-size: 12px; }
+.header { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid #EBEBEB; margin-bottom: 16px; }
+.header-title { font-size: 20px; font-weight: bold; color: #006EFF; }
+.header-attendees { font-size: 12px; color: #888; }
+.summary { font-size: 12px; background-color: #F2F7FF; border-left: 3px solid #006EFF; border-radius: 0 6px 6px 0; padding: 10px 12px; margin-bottom: 16px; line-height: 1.6; color: #333; }
+.logic-chain { display: flex; flex-wrap: nowrap; align-items: stretch; justify-content: space-between; gap: 8px; margin-bottom: 16px; overflow-x: auto; }
+.chain-node { flex: 1; min-width: 0; background: #FFF; border: 1px solid #EBEBEB; border-radius: 6px; padding: 10px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+.chain-node h4 { margin: 0 0 4px 0; font-size: 12px; color: #006EFF; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.chain-node p { margin: 0; font-size: 11px; color: #555; line-height: 1.5; font-weight: bold; }
+.chain-arrow { display: flex; align-items: center; justify-content: center; color: #C0C4CC; font-size: 16px; font-weight: bold; padding: 0 2px; flex-shrink: 0; }
+.module-block { background-color: #FFF; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.03); }
+.module-title { font-size: 15px; font-weight: bold; margin: 0 0 12px 0; color: #111; display: flex; align-items: center; gap: 6px; }
+.density-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.density-table th { color: #111; font-weight: 700; padding: 8px 10px; border-bottom: 1px solid #F0F0F0; background-color: #F8F9FA; }
+.density-table td { padding: 8px 10px; border-bottom: 1px solid #F0F0F0; color: #333; line-height: 1.5; }
+.density-table tr:last-child td { border-bottom: none; }
+.insight-stack { display: flex; flex-direction: column; gap: 8px; }
+.insight-item { position: relative; padding: 10px 14px 10px 28px; border-radius: 6px; font-size: 12px; color: #222; line-height: 1.5; border: 1px solid transparent; }
+.insight-item::before { content: '\2726'; position: absolute; left: 10px; top: 10px; font-size: 12px; }
+.insight-item:nth-child(4n+1) { background-color: #FFF9F0; border-color: #FFE4C4; }
+.insight-item:nth-child(4n+1)::before { color: #FF9D00; }
+.insight-item:nth-child(4n+2) { background-color: #F4FBF7; border-color: #C3E6CB; }
+.insight-item:nth-child(4n+2)::before { color: #00A870; }
+.insight-item:nth-child(4n+3) { background-color: #F8F6FF; border-color: #D8D0FF; }
+.insight-item:nth-child(4n+3)::before { color: #7B61FF; }
+.insight-item:nth-child(4n+4) { background-color: #F0F6FF; border-color: #C2D7FF; }
+.insight-item:nth-child(4n+4)::before { color: #006EFF; }
+.todo-title { color: #00B3A1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">计算机体系结构 — 存储器层次与可编程逻辑专题授课</div>
+  <div class="header-attendees">👥 赵启涵</div>
+</div>
+
+<div class="summary">
+本次课程系统讲解了CPU与存储器的接口原理，涵盖单比特内存读写、地址译码（2-4/3-8译码器）、行列矩阵寻址、SRAM与DRAM电容存储及刷新机制、ROM/Mask ROM/EPROM/EEPROM/Flash（NOR vs NAND）区别，并延伸至FPGA结构与Verilog硬件描述入门演示。
+</div>
+
+<!-- 横向逻辑链 -->
+<div class="logic-chain">
+  <div class="chain-node">
+    <h4>🔌 存储接口</h4>
+    <p>单线读写、片选与地址译码原理</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>💾 SRAM/DRAM</h4>
+    <p>锁存器结构、电容刷新与行列矩阵</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>🗂 非易失存储</h4>
+    <p>ROM类型演进与Flash单元原理</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>⚙️ FPGA简介</h4>
+    <p>查找表、配置流与Verilog演示</p>
+  </div>
+</div>
+
+<!-- 模块1 -->
+<div class="module-block">
+  <div class="module-title">🔌 存储接口 —— 地址译码与片选映射</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>单比特内存读写</strong>：通过三态门控制读/写方向，用使能信号隔离总线，防止多设备同时驱动同一数据线。</div>
+    <div class="insight-item"><strong>地址译码器</strong>：2-4译码器将A0/A1转为4根独热使能线；3-8译码器扩展至三根地址线，大幅减少选择逻辑门数。</div>
+    <div class="insight-item"><strong>多模块片选</strong>：高位地址线（如A12+）经反相分别接入不同4K模块的/CS端，实现地址空间0–4095与4096–8191的物理映射。</div>
+    <div class="insight-item"><strong>行列矩阵寻址</strong>：大容量内存分Row/Column两次锁存地址（RAS/CAS），将百万级译码门降至约行数+列数的线性规模。</div>
+  </div>
+</div>
+
+<!-- 模块2 -->
+<div class="module-block">
+  <div class="module-title">💾 SRAM/DRAM —— 存储单元结构与刷新</div>
+  <table class="density-table">
+    <thead>
+      <tr><th>类型</th><th>基本单元</th><th>是否需要刷新</th><th>特点</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>SRAM</strong></td>
+        <td>6晶体管双稳态锁存器</td>
+        <td>否（掉电丢失）</td>
+        <td>速度快、密度低、功耗大，用于CPU Cache/寄存器</td>
+      </tr>
+      <tr>
+        <td><strong>DRAM</strong></td>
+        <td>1晶体管+1电容（极少量电子）</td>
+        <td>是（周期性刷新保持电荷）</td>
+        <td>密度极高、便宜、较慢，需控制器定期刷新</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 模块3 -->
+<div class="module-block">
+  <div class="module-title">🗂 非易失存储 —— ROM类型与Flash原理</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>Mask ROM / OTP</strong>：工厂掩模编程或一次性可编程熔丝，成本低不可擦除，适合固化的引导代码。</div>
+    <div class="insight-item"><strong>UV EPROM / EEPROM</strong>：紫外线窗口擦除或电可擦除，EEPROM支持字节擦写但容量小（kB级），用于配置存储。</div>
+    <div class="insight-item"><strong>NOR Flash</strong>：按字节随机读取、XIP执行，适合BIOS/Bootloader，写入擦除慢于NAND。</div>
+    <div class="insight-item"><strong>NAND Flash与MLC/QLC</strong>：按块操作，高密度多电平存储（2/3/4 bit/cell），有磨损均衡与坏块管理，用于SSD/大容量存储。</div>
+  </div>
+</div>
+
+<!-- 模块4 -->
+<div class="module-block">
+  <div class="module-title">⚙️ FPGA简介 —— LUT结构与Verilog开发流程</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>可编程逻辑单元</strong>：FPGA由大量LUT（查找表）、触发器及可编程互连矩阵组成，可重配置实现任意组合/时序逻辑。</div>
+    <div class="insight-item"><strong>配置加载</strong>：上电后从外部Flash载入bitstream配置互连开关，定义LUT内容和布线连接，掉电丢失需重配。</div>
+    <div class="insight-item"><strong>Verilog开发流</strong>：文本编辑→综合（映射到LUT/FF）→布局布线→生成配置文件→下载至板载FPGA，演示计数器LED闪烁。</div>
+    <div class="insight-item"><strong>软核与扩展</strong>：可在FPGA内综合软CPU（如RISC-V）、外设控制器，适合高速并行接口（HDMI、网络包处理）卸载。</div>
+  </div>
+</div>
+
+</body>
+</html>
